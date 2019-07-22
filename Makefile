@@ -1,3 +1,5 @@
-loop: ; while inotifywait nix.md; do eval $$buildPhase; done
+build: ; eval $$buildPhase
 
-all: loop
+autoreload: ; while inotifywait -qq nix.md; do eval $$buildPhase; done
+
+all: build

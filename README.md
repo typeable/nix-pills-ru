@@ -2,8 +2,12 @@
 
 This repo contains a presentation about nix based on the wonderful [nix-pills](https://nixos.org/nixops/nix-pills).
 
-Markdown document is located [here](./nix.md)
+Markdown document is located [here](./presentation.md).
 
-To build a PDF presentation and speaker's notes in HTML, run `nix-shell`
+PDF is located in the ["releases" tab in github repo](https://github.com/typeable/nix-pills-ru/releases).
 
-To start automatic regeneration of aforementioned build artifacts, run `nix-shell --run make`
+To enter an environment with all the needed packages, run `nix-shell`.
+
+To build PDF of the presentation and speaker's notes, run `make` (either after installing `pandoc`, `pandoc-filter-graphviz` and `graphviz` or from within the `nix-shell`).
+
+To start automatic regeneration of aforementioned files, run `make autoreload`.

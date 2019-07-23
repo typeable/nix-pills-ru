@@ -26,6 +26,4 @@ in stdenv.mkDerivation rec {
   phases = [ "buildPhase" ];
   
   preferLocalBuild = true;
-
-  shellHook = "make build";
 }

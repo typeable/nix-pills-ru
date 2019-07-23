@@ -3,8 +3,8 @@ title: Nix
 subtitle: Язык, пакетный менеджер и экосистема
 author: Александр Бантьев @balsoft, typeable.io
 description: |
-    Вольный пересказ nix-pills на русском языке.
-    https://nixos.org/nixos/nix-pills, автор Luca Bruno (aka Lethalman)
+  Вольный пересказ nix-pills на русском языке.
+  https://nixos.org/nixos/nix-pills, автор Luca Bruno (aka Lethalman)
 theme: Boadilla
 colortheme: dolphin
 mainfont: Roboto
@@ -13,20 +13,19 @@ aspectratio: 169
 titlegraphic: images/nix.png
 toc: true
 header-includes:
-- \usepackage[utf8]{inputenc}
-- \usepackage[russian]{babel}
-- \uselanguage{Russian}
-- \languagepath{Russian}
-- \usepackage{tikz}
+  - \usepackage[utf8]{inputenc}
+  - \usepackage[russian]{babel}
+  - \uselanguage{Russian}
+  - \languagepath{Russian}
+  - \usepackage{tikz}
 ---
+
+# Вступление
 
 <!--
 <meta charset="utf8" />
 <title>Заметки выступающего</title>
-# Заметки выступающего
 -->
-
-# Вступление
 
 Основано на <https://nixos.org/nixos/nix-pills> . Огромная благодарность @Lethalman и @grahamc за написание и поддержку этого материала!
 
@@ -91,7 +90,7 @@ digraph {
 }
 ```
 
-
+    
 # Nix как пакетный менеджер
 
 > Nix is a powerful package manager for Linux and other Unix systems that makes package management reliable and reproducible. It provides atomic upgrades and rollbacks, side-by-side installation of multiple versions of a package, multi-user package management and easy setup of build environments.
@@ -302,6 +301,22 @@ nix-repl> /home/balsoft/Документы
 error: path '/home/balsoft/' has a trailing slash
 ```
 
+## `NIX_PATH` и `<nixpkgs>`
+<!--
+`NIX_PATH` -- переменная, очень похожая на `PATH` по синтаксису значений (значения разделены двоеточием), в которой nix ищет пути запрошенные через синтаксис `<path>`.
+-->
+```
+$ NIX_PATH=home=$HOME nix repl
+nix-repl> <home>
+/home/balsoft
+^D
+$ NIX_PATH=/home nix repl
+nix-repl> <balsoft>
+/home/balsoft
+$ nix repl
+nix-repl> <nixpkgs>
+/nix/store/zzjhgd7p1y879z0y9pz70vjd45yfi9iz-nixpkgs
+```
 ## Списки (lists)
 
 Списки в Nix иммутабельны и могут содержать значения любых типов вперемешку.
@@ -326,6 +341,8 @@ nix-repl> [ import ./hello.nix {} ]
 ## Множества аттрибутов (attribute sets, attrsets)
 ```
 nix-repl> s = { foo = "bar"; a-b = "baz"; "123" = "num"; }
+nix-repl> :t s
+a set
 nix-repl> s
 { "123" = "num"; a-b = "baz"; foo = "bar"; }
 nix-repl> s.a-b
@@ -334,6 +351,15 @@ nix-repl> s."123"
 "num"
 nix-repl> s.${toString (122 + 1)}
 "num"
+```
+***
+```
+nix-repl> s ? "123"
+true
+nix-repl> s ? a-b
+true
+nix-repl> s ? abc
+false
 nix-repl> s.abc or "not found" # Note that `or` is a keyword
 "not found"
 nix-repl> s // { a = 10; }
@@ -754,6 +780,9 @@ pkgs: attrs:
 derivation (defaultAttrs // attrs)
 ```
 ## `mkDerivation`: воспользуемся нашей функцией!
+<!--
+Отлично! Наша функция умеет собирать autotools-проекты, при этом `builder.sh` получился очень простым благодаря `setup.nix`. Теперь если мы хотим собрать проект не на основе autotools, мы можем это легко сделать, пропустив некоторые фазы в builder.
+-->
 ### `default.nix`
 ```
 let
@@ -767,6 +796,9 @@ mkDerivation {
 ```
 
 ## Пакеты как функции от зависимостей: паттерн inputs
+<!--
+Сделаем наш репозиторий ещё удобнее, вынеся определения пакетов в отдельные файлы. В каждом таком файле будет находиться функция, принимающая в качестве аргументов зависимости пакета и возвращающая деривацию (который мы будем создавать с помощью нашего `mkDerivation`)
+-->
 ### `hello.nix`
 ```
 { mkDerivation }:
@@ -775,6 +807,7 @@ mkDerivation {
   src = ./hello-2.10.tar.gz;
 }
 ```
+
 ### `default.nix`
 ```
 let
@@ -785,4 +818,205 @@ in
   hello = import ./hello.nix { inherit mkDerivation };
 }
 ```
+
+## Сборка с библиотеками: `NIX_CFLAGS_COMPILE`, `NIX_LDFLAGS`
+<!--
+Если мы хотим собирать пакеты, которые зависят от сторонних библиотек, нам понадобится ещё немного магии: нужно указать GCC и ld, где искать заголовочные и объектные файлы библиотек. Для этого существуют переменные `NIX_CFLAGS_COMPILE` и `NIX_LDFLAGS_`
+-->
+### `generic-builder.sh`
+```
+[...]
+for p in $baseInputs $buildInputs; do
+  if [ -d $p/bin ]; then
+    export PATH="$p/bin${PATH:+:}$PATH"
+  fi
+  if [ -d $p/include ]; then
+    export NIX_CFLAGS_COMPILE="-I $p/include${NIX_CFLAGS_COMPILE:+ }$NIX_CFLAGS_COMPILE"
+  fi
+  if [ -d $p/lib ]; then
+    export NIX_LDFLAGS="-rpath $p/lib -L $p/lib${NIX_LDFLAGS:+ }$NIX_LDFLAGS"
+  fi
+done
+[...]
+```
+***
+### `graphviz.nix`
+```
+{ mkDerivation, gdSupport ? true, gd, fontconfig, libjpeg, bzip2 }:
+
+mkDerivation {
+  name = "graphviz";
+  src = ./graphviz-2.38.0.tar.gz;
+  buildInputs = if gdSupport then [ gd fontconfig libjpeg bzip2 ] else [];
+}
+```
+***
+### `default.nix`
+```
+let
+  pkgs = import <nixpkgs> {};
+  mkDerivation = import ./generic-builder.nix pkgs;
+in
+{
+  hello = import ./hello.nix { inherit mkDerivation };
+  graphviz = import ./graphviz.nix { inherit mkDerivation 
+      gd fontconfig libjpeg bzip2; };
+  graphvizCore = import ./graphviz.nix {
+    inherit mkDerivation gd fontconfig libjpeg bzip2;
+    gdSupport = false;
+  };
+}
+```
+
+## Паттерн `callPackage`
+<!--
+Здорово! Мы сделали свой небольшой репозиторий с красивой файловой структурой, научились собирать пакеты с помощью autotools с возможностью легко перейти на другие системы сборки и даже собирать пакеты с библиотеками. Теперь пора уменьшить бойлерплейт. Можно заметить, что в корневом файле репозитория мы повторяем названия аргументов функции при её вызове. Это будет происходить постоянно при структуре репозитория, похожего на наш. Для того, чтобы исправить эту проблему, мы создадим функцию `callPackage`, которая будет вызывать функцию из указанного файла, автоматически передавая ей аргументы из указанного attrset. Например:
+-->
+### `default.nix`
+```
+{
+  hello = callPackage ./hello.nix { };
+  graphviz = callPackage ./graphviz.nix { };
+  graphvizCore = callPackage ./graphviz.nix
+                 { gdSupport = false; };
+}
+```
+***
+<!--
+Для начала разберемся с тем, как же нам найти названия аргументов функции. В nix для этого существует встроенная функция `builins.functionArgs`. Она возвращает attrset, в котором названию аргументов соответствует наличие у них значения по-умолчанию.
+-->
+```
+nix-repl> add = { a ? 3, b }: a+b
+nix-repl> builtins.functionArgs add
+{ a = true; b = false; }
+```
+<!--
+Также в nix существует удобный builtin для "пересечения" двух attrset-ов. Он возвращает attrset, в котором имена аттрибутов -- пересечение имен аттрибутов его аргументов, а их значения берутся из второго аргумента. Например:
+-->
+```
+nix-repl> values = { a = 3; b = 5; c = 10; }
+nix-repl> builtins.intersectAttrs values (builtins.functionArgs add)
+{ a = true; b = false; }
+nix-repl> builtins.intersectAttrs (builtins.functionArgs add) values
+{ a = 3; b = 5; }
+```
+## Простой вариант `callPackage`
+<!--
+Обладая этими знаниями, напишем простую реализацию нашего callPackage.
+-->
+```
+nix-repl> callPackage = set: f: 
+          f (builtins.intersectAttrs 
+            (builtins.functionArgs f) set)
+nix-repl> callPackage values add
+8
+nix-repl> with values; add { inherit a b; }
+8
+```
+## `callPackage`: добавляем оверрайды
+<!--
+Добавим возможность перегружать значения с помощью последнего аргумента...
+-->
+```
+nix-repl> callPackage = set: f: overrides: 
+            f ((builtins.intersectAttrs 
+              (builtins.functionArgs f) set) // overrides)
+nix-repl> callPackage values add { }
+8
+nix-repl> callPackage values add { b = 12; }
+15
+```
+## `callPackage`: используем!
+```
+let
+  nixpkgs = import <nixpkgs> {};
+  allPkgs = nixpkgs // pkgs;
+  callPackage = path: overrides:
+    let f = import path;
+    in f ((builtins.intersectAttrs (builtins.functionArgs f) allPkgs) // overrides);
+  pkgs = with nixpkgs; {
+    mkDerivation = import ./generic-builder.nix nixpkgs;
+    hello = callPackage ./hello.nix { };
+    graphviz = callPackage ./graphviz.nix { };
+    graphvizCore = callPackage ./graphviz.nix { gdSupport = false; };
+  };
+in pkgs
+```
+## Паттерн `override`
+<!--
+Nix -- это функциональный язык. Одна из идей функциональной парадигмы состоит в композиции функций. Это может быть очень удобно при работе с деривациями. Например, если мы хотим получить `graphviz`, собранный с нашей собственной версией библиотеки gd, на данный момент нам придется заново делать `callPackage ./graphviz.nix { gd = customgd; }` Это неудобно и добавляет бойлерплейт. 
+-->
+```
+mygraphviz = callPackage ./graphviz.nix { gd = customgd; }
+
+VS.
+
+mygraphviz = pkgs.graphviz.override { gd = customgd }
+```
+***
+<!--
+Для реализации нашей затеи напишем функцию `mkOverridable`, которая будет принимать функцию, возвращающую attrset, и attrset (который будет являться "дефолтными" аргументами для данной функции). Вернет `makeOverridable` тот же attrset, что вернула бы данная функция, с добавлением аттрибута `override`, который является функцией, позволяющей нам "перегружать" стандартные аргументы.
+-->
+### `lib.nix`
+```
+rec {
+  makeOverridable = f: origArgs:
+    let
+      origRes = f origArgs;
+    in
+      origRes // { 
+        override = newArgs: 
+          makeOverridable f (origArgs // newArgs); 
+      };
+}
+```
+***
+### Протестируем в `nix repl`
+<!--
+Работает! Теперь мы можем легко "перегружать" аргументы пакетов (которые, напомню, просто функции) в нашем репозитории. Нужно только не забыть вызывать все эти пакеты с makeOverridable.
+-->
+```
+nix-repl> :l lib.nix
+Added 1 variables.
+nix-repl> f = { a, b }: { result = a+b; }
+nix-repl> res = makeOverridable f { a = 3; b = 5; }
+nix-repl> res2 = res.override { a = 10; }
+nix-repl> res2
+{ override = «lambda»; result = 15; }
+nix-repl> res2.override { b = 20; }
+{ override = «lambda»; result = 30; }
+```
+***
+### `lib.nix`
+```
+rec {
+  [...]
+  callPackage = pkgs: path: overrides:
+    let f = import path;
+    in makeOverridable 
+      f ((builtins.intersectAttrs 
+        (builtins.functionArgs f) pkgs) // overrides);
+}
+```
+***
+### `default.nix`
+```
+let
+  lib = import ./lib.nix;
+  nixpkgs = import <nixpkgs> {};
+  callPackage = lib.callPackage allPkgs;
+  allPkgs = nixpkgs // pkgs;
+  pkgs = with nixpkgs; rec {
+    mkDerivation = import ./generic-builder.nix nixpkgs;
+    hello = callPackage ./hello.nix { };
+    graphviz = callPackage ./graphviz.nix { };
+    graphvizCore = graphviz.override { gdSupport = false };
+  };
+in pkgs
+```
+## nixpkgs
+<!--
+Изначально я планировал вкратце рассказать про остальные паттерны nixpkgs, но в итоге получился просто объяснение, что же происходит в каждом файле, которое к тому же растянуло бы презентацию ещё на несколько десятков слайдов. На самом деле, на данный момент ваших знаний nix вполне достаточно для чтения исходников nixpkgs.
+-->
+> Изучение nixpkgs остается в качестве упражнения для слушателя. 
 

@@ -5,6 +5,6 @@ speaker-notes.html: speaker-notes.md; pandoc speaker-notes.md -o speaker-notes.h
 
 build: nix.pdf nix.html speaker-notes.html
 
-autoreload: ; while inotifywait -qq nix.md; do $MAKE build; done
+autoreload: ; while inotifywait -qq nix.md; do make build; done
 
 all: build

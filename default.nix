@@ -19,8 +19,6 @@ in stdenv.mkDerivation rec {
     hack-font
     graphviz
     dot2tex
-    
-    inotify-tools
   ];
   
   src = ./.;

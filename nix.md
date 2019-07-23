@@ -53,13 +53,13 @@ header-includes:
 
 [Nix](https://nixos.org/nix) -- это
 
-#. Язык
+1. Язык
    + Декларативный
    + Функциональный
    + Чистый
    + Ленивый
    + Динамически типизированный
-#. Пакетный менеджер
+2. Пакетный менеджер
    + Атомарный
    + Повторяемый
    + Source/Binary
@@ -652,7 +652,7 @@ graph [ dpi=200; ]
 ```
 set -e
 unset PATH
-for p in $buildInputs; do
+for p in $buildInputs $baseInputs; do
   export PATH=$p/bin${PATH:+:}$PATH
 done
 tar -xf $src
@@ -672,13 +672,117 @@ make install
 -->
 ### `generic-builder.nix`
 ```
-{ buildInputs, pkgs, ... }@args:
-with pkgs;
-derivation (args // {
-  buildInputs = buildInputs 
-    ++ [ gnutar gzip gnumake gcc binutils-unwrapped 
-         coreutils gawk gnused gnugrep ];
-  builder = "${bash}/bin/bash";
-  args = [ ./generic-builder.sh ];
-})
+pkgs: attrs:
+  with pkgs;
+  let defaultAttrs = {
+    builder = "${bash}/bin/bash";
+    args = [ ./builder.sh ];
+    baseInputs = [ gnutar gzip gnumake gcc binutils-unwrapped 
+                   coreutils gawk gnused gnugrep findutils ];
+    buildInputs = [];
+    system = builtins.currentSystem;
+  };
+  in
+derivation (defaultAttrs // attrs)
 ```
+## `mkDerivation`: добавляем фазы
+<!--
+Создадим файл `setup.sh`, в котором определим стандартные "фазы" сборки, которые затем будем использовать в `builder.sh`.
+-->
+```
+unset PATH
+for p in $baseInputs $buildInputs; do
+  export PATH=$p/bin${PATH:+:}$PATH
+done
+
+function unpackPhase() {
+  tar -xzf $src
+
+  for d in *; do
+    if [ -d "$d" ]; then
+      cd "$d"
+      break
+    fi
+  done
+}
+```
+***
+```
+function configurePhase() {
+  ./configure --prefix=$out
+}
+function buildPhase() {
+  make
+}
+function installPhase() {
+  make install
+}
+function genericBuild() {
+  unpackPhase
+  configurePhase
+  buildPhase
+  installPhase
+  fixupPhase
+}
+```
+
+***
+
+### `builder.sh`
+```
+set -e
+source $setup
+genericBuild
+```
+
+***
+
+### `generic-builder.nix`
+```
+pkgs: attrs:
+  with pkgs;
+  let defaultAttrs = {
+    builder = "${bash}/bin/bash";
+    args = [ ./builder.sh ];
+    setup = ./setup.sh;
+    baseInputs = [ gnutar gzip gnumake gcc binutils-unwrapped 
+                   coreutils gawk gnused gnugrep  findutils ];
+    buildInputs = [];
+    system = builtins.currentSystem;
+  };
+  in
+derivation (defaultAttrs // attrs)
+```
+## `mkDerivation`: воспользуемся нашей функцией!
+### `default.nix`
+```
+let
+  pkgs = import <nixpkgs> {};
+  mkDerivation = import ./generic-builder.nix pkgs;
+in
+mkDerivation {
+  name = "hello";
+  src = ./hello-2.10.tar.gz;
+};
+```
+
+## Пакеты как функции от зависимостей: паттерн inputs
+### `hello.nix`
+```
+{ mkDerivation }:
+mkDerivation {
+  name = "hello";
+  src = ./hello-2.10.tar.gz;
+}
+```
+### `default.nix`
+```
+let
+  pkgs = import <nixpkgs> {};
+  mkDerivation = import ./generic-builder.nix pkgs;
+in
+{
+  hello = import ./hello.nix { inherit mkDerivation };
+}
+```
+

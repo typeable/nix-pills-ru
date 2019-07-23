@@ -30,11 +30,4 @@ in stdenv.mkDerivation rec {
   preferLocalBuild = true;
 
   shellHook = "make build";
-
-  buildPhase = ''
-    pandoc nix.md -t beamer --slide-level=2 --pdf-engine xelatex -F pandoc-filter-graphviz -o nix.pdf;
-    pandoc nix.md -t slidy -F pandoc-filter-graphviz -o nix.html;
-    sed -e "/<!--/,/-->/!d" nix.md | sed -e "s/<!--//" | sed -e "s/-->/\n\* \* \*/" > speaker-notes.md;
-    pandoc speaker-notes.md -o speaker-notes.html
-  '';
 }

@@ -1,0 +1,860 @@
+<div id="вступление" class="slide section level1">
+<h1>Вступление</h1>
+<!--
+<meta charset="utf8" />
+<title>Заметки выступающего</title>
+-->
+<p>Основано на <a href="https://nixos.org/nixos/nix-pills" class="uri">https://nixos.org/nixos/nix-pills</a> . Огромная благодарность <span class="citation">@Lethalman</span> и <span class="citation">@grahamc</span> за написание и поддержку этого материала!</p>
+<p>Я хотел бы, чтобы к концу презентации всем стало понятно</p>
+<ul>
+<li>Что такое Nix</li>
+<li>Как собрать пакеты из <code>contractor</code> с помощью nix</li>
+<li>Что находится в <code>contractor/nix/pkgs</code></li>
+<li>Что находится в <code>contractor/nix/overlay.nix</code></li>
+<li>Как писать несложные выражения на nix, не совершая неочевидных ошибок</li>
+</ul>
+<p>Вы можете прекратить слушать после любой секции, и я надеюсь, что вы унесете какую-то полезную для себя информацию.</p>
+<p>Исходники, собранный pdf и заметки докладчика для этой презентации находятся на <a href="https://github.com/typeable/nix-pills-ru" class="uri">https://github.com/typeable/nix-pills-ru</a></p>
+<!-- 
+Как вы все скорее всего знаете, мы используем Nix для сборки и тестирования нашего кода. Я, Александр Бантьев (@balsoft) отвечаю за инфраструктуру сборки пакетов (Hydra, NixOps), а также за поддержание инструкций сборки в актуальном состоянии. Я бы хотел рассказать вам про nix с помощью вольного пересказа отличной серии статей ["Nix pills"](https://nixos.org/nixos/nix-pills)
+-->
+<h2 id="что-такое-nix">Что такое nix?</h2>
+<!-- 
+Говоря "Nix", мы подразумеваем одну из двух его ипостасей -- Nix как язык или Nix как пакетный менеджер. Такая путаница возникла из-за того, что как DSL Nix имеет смысл только в связке со своим пакетным менеджером, а как пакетный менеджер он без своего языка слишком сложен в использовании, и Eelco Dolstra (создатель Nix) решил не разделять их.
+-->
+<p><a href="https://nixos.org/nix">Nix</a> – это</p>
+<ol style="list-style-type: decimal">
+<li>Язык
+<ul>
+<li>Декларативный</li>
+<li>Функциональный</li>
+<li>Чистый</li>
+<li>Ленивый</li>
+<li>Динамически типизированный</li>
+</ul></li>
+<li>Пакетный менеджер
+<ul>
+<li>Атомарный</li>
+<li>Повторяемый</li>
+<li>Source/Binary</li>
+</ul></li>
+</ol>
+<h2 id="экосистема">Экосистема</h2>
+<!-- 
+Nix довольно быстро стал широко известен в узких кругах, и вокруг него возникла большая экосистема декларативных, атомарных инструментов, в том числе:
+
+*  nixpkgs, репозиторий описаний пакетов на языке nix;
+*  NixOS, дистрибутив GNU/Linux с интересным подходом к конфигурации системы;
+*  NixOps, инструментарий для разворачивания виртуальных машин и приложений на них на базе NixOS;
+*  Hydra, CI -- сервер;
+*  Disnix, система для разворачивания распределенных систем.
+-->
+<p><img src="images/graphviz-8192fc5615858231309e589f5892c04c8314b9078de8fb84b070abd59b0b1934.png" alt="digraph {
+    graph [ dpi = 200; font = Hack; ];
+    subgraph cluster_nix {
+        &quot;nix (пакетный менеджер)&quot; -&gt; &quot;nix (язык)&quot;;
+        &quot;nix (язык)&quot; -&gt; &quot;nix (пакетный менеджер)&quot;;
+        color = blue;
+    }
+    cluster_nix -&gt; Disnix;
+    cluster_nix -&gt; Hydra;
+    cluster_nix -&gt; nixpkgs -&gt; NixOS -&gt; NixOps;
+}" /></p>
+</div>
+<div id="nix-как-пакетный-менеджер" class="slide section level1">
+<h1>Nix как пакетный менеджер</h1>
+<blockquote>
+<p>Nix is a powerful package manager for Linux and other Unix systems that makes package management reliable and reproducible. It provides atomic upgrades and rollbacks, side-by-side installation of multiple versions of a package, multi-user package management and easy setup of build environments.</p>
+</blockquote>
+<p><em>— nixos.org/nix</em></p>
+<!--
+На https://nixos.org/nix заявлено, что nix -- это все-таки пакетный менеджер. С этого компонента мы и начнем.
+-->
+<h2 id="хранилище-nix-store">Хранилище (nix store)</h2>
+<!--
+Центральным местом файловой системы для Nix является Хранилище (nix store). Именно здесь хранятся все файлы, с которыми оперирует наш пакетный менеджер: инструкции сборки и её результаты -- исполняемые файлы, документация, заголовочные файлы, etc.
+
+Все элементы директории `/nix/store` имеют одинаковый формат имени -- `<hash>-<name>[-version][-output]`. Хэш вычисляется при добавлении в хранилище или при сборке на основе содержимого файла либо содержимого деривации (инструкции сборки), из которого этот путь был собран.
+-->
+<blockquote>
+<p>In the beginning was the Store, and the Store was with Nix, and the Store was Nix.</p>
+</blockquote>
+<p><em>— Nix manual, 1:1</em></p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><a class="sourceLine" id="cb1-1" title="1">$ <span class="fu">ls</span> /nix/store <span class="kw">|</span> <span class="fu">wc</span> -l</a>
+<a class="sourceLine" id="cb1-2" title="2"><span class="ex">46251</span></a>
+<a class="sourceLine" id="cb1-3" title="3">$ <span class="ex">nix</span> add-to-store nix.conf</a>
+<a class="sourceLine" id="cb1-4" title="4"><span class="ex">/nix/store/za34q8y0jcx3qsrnbrd005mh8zcnlrlr-nix.conf</span></a></code></pre></div>
+<h3 id="формат-имени">Формат имени</h3>
+<pre><code>&lt;hash&gt;-&lt;name&gt;[-version][-output]</code></pre>
+<p>Например,</p>
+<pre><code>/nix/store/04mm93j20jlnwvhh21db674b3vy6fs54-pandoc-2.7.1-data
+          |              hash              | name | ver | out |</code></pre>
+<h2 id="принцип-работы">Принцип работы</h2>
+<!-- 
+В общих чертах, получение результата любого выражения (в терминологии ПМ -- пакета) на nix состоит из двух этапов -- вычисления (за это отвечает nix как язык), и сборки -- именно эта часть ложится на плечи nix как пакетного менеджера.
+-->
+<p><img src="images/graphviz-a226e3212ab86c6caf182261f96850451237da3d2f6e3a4ed9b2eb38cb343d17.png" alt="digraph {
+    graph [ dpi = 200; font = Hack; ]; 
+    &quot;myname.nix&quot; -&gt; &quot;/nix/store/...-myname.drv&quot; [ label = &quot; Вычисление (nix как язык)&quot; ];
+    &quot;/nix/store/...-myname.drv&quot; -&gt; &quot;/nix/store/...-myname&quot; [ label = &quot; Сборка (nix как пакетный менеджер)&quot; ];
+}" /></p>
+<h2 id="деривации-derivations-.drv-files">Деривации (derivations, <code>.drv</code> files)</h2>
+<!--
+Для сборки пакетов любому пакетному менеджеру нужны инструкции. Например, ABS (Arch build system) использует PKGBUILD, portage (Gentoo) использует EBUILD, brew использует recepies. Nix не является исключением, и для сборки он использует Деривации (.drv). Пример деривации (с добавленными мною переносами строки и пробелами для улучшения читаемости) -- на слайде.
+-->
+<h3 id="nixstorez3hhlxbckx4g3n9sw91nnvlkjvyw754p-myname.drv"><code>/nix/store/z3hhlxbckx4g3n9sw91nnvlkjvyw754p-myname.drv</code></h3>
+<pre><code>Derive
+([(&quot;out&quot;
+  ,&quot;/nix/store/40s0qmrfb45vlh6610rk29ym318dswdr-myname&quot;,&quot;&quot;,&quot;&quot;)]
+,[]
+,[]
+,&quot;mysystem&quot;
+,&quot;mybuilder&quot;
+,[]
+,[(&quot;builder&quot;,&quot;mybuilder&quot;)
+ ,(&quot;name&quot;,&quot;myname&quot;)
+ ,(&quot;out&quot;,&quot;/nix/store/40s0qmrfb45vlh6610rk29ym318dswdr-myname&quot;)
+ ,(&quot;system&quot;,&quot;mysystem&quot;) ] )</code></pre>
+<h2 id="краткая-справка-по-инструментарию">Краткая справка по инструментарию</h2>
+<h3 id="собрать-buildrealize-деривацию">Собрать (build/realize) деривацию</h3>
+<pre><code>$ nix-store -r /nix/store/z3hhlxbckx4g3n9sw91nnvlkjvyw754p-myname.drv</code></pre>
+<h3 id="вычислить-evaluate-и-затем-собрать-содержимое-файла-default.nix">Вычислить (evaluate) и затем собрать содержимое файла <code>default.nix</code></h3>
+<pre><code>$ nix build -f default.nix # или nix-build default.nix</code></pre>
+<h3 id="вычислить-собрать-и-запустить-интерактивное-окружение">Вычислить, собрать и запустить интерактивное окружение</h3>
+<pre><code>$ nix run -f default.nix # или nix-shell default.nix</code></pre>
+</div>
+<div id="nix-как-язык" class="slide section level1">
+<h1>Nix как язык</h1>
+<!--
+В общих чертах разобравшись с пакетным менеджером, перейдем к языку. Большая часть синтаксиса, конструкций и идей будет знакома вам по другим языкам, поэтому мы быстро пробежимся по примерам, останавливаясь лишь на уникальных чертах и граблях, на которые легко наступить.
+-->
+<p>Рассмотрим основы синтаксиса Nix.</p>
+<p>Краткая инструкция для желающих повторить:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode bash"><code class="sourceCode bash"><a class="sourceLine" id="cb8-1" title="1">$ <span class="ex">curl</span> https://nixos.org/nix/install <span class="kw">|</span> <span class="fu">sh</span></a>
+<a class="sourceLine" id="cb8-2" title="2"><span class="op">&lt;</span><span class="ex">...</span><span class="op">&gt;</span></a>
+<a class="sourceLine" id="cb8-3" title="3">$ <span class="ex">nix</span> repl</a></code></pre></div>
+<h2 id="числа-арифметика-и-комментарии">Числа, арифметика и комментарии</h2>
+<pre><code>nix-repl&gt; :t 4 # Показать тип выражения
+an integer
+nix-repl&gt; 1 + 2 - 3 * 2
+-3
+nix-repl&gt; 1 / 2
+0
+nix-repl&gt; builtins.add 1 2
+3
+nix-repl&gt; # Однострочный комментарий
+nix-repl&gt; /* Многострочный комментарий */</code></pre>
+<h3 id="замечание">Замечание</h3>
+<p>Арифметические операторы лучше обносить пробелами! У символов <code>/</code> и <code>-</code> есть особые значения в Nix</p>
+<pre><code>nix-repl&gt; 6/2
+/home/balsoft/6/2</code></pre>
+<h2 id="булевы-булева-арифметика-и-if">Булевы, булева арифметика и if</h2>
+<pre><code>nix-repl&gt; :t true
+a boolean
+nix-repl&gt; true &amp;&amp; false
+false
+nix-repl&gt; true || false
+true
+nix-repl&gt; if true || false then 3 else 4
+3
+nix-repl&gt; if false then 5 else 6
+6</code></pre>
+<h2 id="строки-strings">Строки (strings)</h2>
+<pre><code>nix-repl&gt; &quot;foo&quot;
+&quot;foo&quot;
+nix-repl&gt; :t &quot;foo&quot;
+a string
+nix-repl&gt; &quot;Привет&quot;
+&quot;Привет&quot;
+nix-repl&gt; &#39;&#39;foo&#39;&#39;
+&quot;foo&quot;
+nix-repl&gt; &#39;&#39;
+          foo
+          bar
+          &#39;&#39;
+&quot;foo\nbar\n&quot;</code></pre>
+<h2 id="переменные-и-стороковая-интерполяция">Переменные и стороковая интерполяция</h2>
+<pre><code>nix-repl&gt; foo = &quot;hello&quot;
+nix-repl&gt; &quot;${foo}, world!&quot;
+&quot;hello, world!&quot;</code></pre>
+<h3 id="замечание-1">Замечание</h3>
+<p>Названия переменных могут содержать знак <code>-</code></p>
+<pre><code>nix-repl&gt; foo-bar = 10
+nix-repl&gt; foo-bar
+10</code></pre>
+<p>Но не могут содержать не-ASCII!</p>
+<pre><code>nix-repl&gt; привет
+error: syntax error, unexpected $undefined, at (string):1:1</code></pre>
+<h2 id="как-избежать-интерполяции">Как избежать интерполяции?</h2>
+<p>Довольно часто встречаются ситуации, когда мы хотим вставить в строку последовательность <code>${...}</code> (например, в bash-код).</p>
+<pre><code>nix-repl&gt; &quot;\${foo}&quot;
+&quot;${foo}&quot;
+
+nix-repl&gt; &#39;&#39;test &#39;&#39;${foo} test&#39;&#39;
+&quot;test ${foo} test&quot;</code></pre>
+<h2 id="пути-paths-и-url">Пути (paths) и URL</h2>
+<pre><code>nix-repl&gt; /bin/sh
+/bin/sh
+nix-repl&gt; :t /bin/sh
+a path
+nix-repl&gt; ./hello # Относительно текущего .nix файла или PWD для repl
+/home/balsoft/hello
+nix-repl&gt; https://typeable.io # Синтаксический сахар для строк
+&quot;https://typeable.io&quot;
+nix-repl&gt; :t https://typeable.io
+a string</code></pre>
+<h3 id="замечание-2">Замечание</h3>
+<p>Пути, как и названия переменных, не могут содержать не-ASCII. Я бы рассматривал это, как баг.</p>
+<pre><code>nix-repl&gt; /home/balsoft/Документы
+error: path &#39;/home/balsoft/&#39; has a trailing slash</code></pre>
+<h2 id="nix_path-и-nixpkgs"><code>NIX_PATH</code> и <code>&lt;nixpkgs&gt;</code></h2>
+<!--
+`NIX_PATH` -- переменная, очень похожая на `PATH` по синтаксису значений (значения разделены двоеточием), в которой nix ищет пути запрошенные через синтаксис `<path>`.
+-->
+<pre><code>$ NIX_PATH=home=$HOME nix repl
+nix-repl&gt; &lt;home&gt;
+/home/balsoft
+^D
+$ NIX_PATH=/home nix repl
+nix-repl&gt; &lt;balsoft&gt;
+/home/balsoft
+$ nix repl
+nix-repl&gt; &lt;nixpkgs&gt;
+/nix/store/zzjhgd7p1y879z0y9pz70vjd45yfi9iz-nixpkgs</code></pre>
+<h2 id="списки-lists">Списки (lists)</h2>
+<p>Списки в Nix иммутабельны и могут содержать значения любых типов вперемешку.</p>
+<pre><code>nix-repl&gt; [ 2 &quot;foo&quot; true (2+3) ]
+[ 2 &quot;foo&quot; true 5 ]
+</code></pre>
+<h3 id="замечание-3">Замечание</h3>
+<p>Обратите внимание: элементы списка не разделены запятыми!</p>
+<pre><code>nix-repl&gt; [ 1 + 2 ]
+error: syntax error, unexpected &#39;+&#39;, at (string):1:5
+nix-repl&gt; [ (1 + 2) ]
+[ 3 ]
+nix-repl&gt; [ import ./hello.nix {} ]
+[ «primop-app» /home/balsoft/hello.nix { ... } ]</code></pre>
+<h2 id="множества-аттрибутов-attribute-sets-attrsets">Множества аттрибутов (attribute sets, attrsets)</h2>
+<pre><code>nix-repl&gt; s = { foo = &quot;bar&quot;; a-b = &quot;baz&quot;; &quot;123&quot; = &quot;num&quot;; }
+nix-repl&gt; :t s
+a set
+nix-repl&gt; s
+{ &quot;123&quot; = &quot;num&quot;; a-b = &quot;baz&quot;; foo = &quot;bar&quot;; }
+nix-repl&gt; s.a-b
+&quot;baz&quot;
+nix-repl&gt; s.&quot;123&quot;
+&quot;num&quot;
+nix-repl&gt; s.${toString (122 + 1)}
+&quot;num&quot;</code></pre>
+<h2 id="множества-аттрибутов">Множества аттрибутов</h2>
+<pre><code>nix-repl&gt; s ? &quot;123&quot;
+true
+nix-repl&gt; s ? a-b
+true
+nix-repl&gt; s ? abc
+false
+nix-repl&gt; s.abc or &quot;not found&quot; # Note that `or` is a keyword
+&quot;not found&quot;
+nix-repl&gt; s // { a = 10; }
+{ &quot;123&quot; = &quot;num&quot;; a = 10; a-b = &quot;baz&quot;; foo = &quot;bar&quot;; }
+nix-repl&gt; rec { a = 3; b = a + 4; } # Recursive attrset
+{ a = 3; b = 7; }</code></pre>
+<h2 id="let-with-и-inherit">Let, with и inherit</h2>
+<pre><code>nix-repl&gt; let a = 3; b = 4; in a + b
+7
+nix-repl&gt; let a = 4; b = a + 5; in b # Let definitions are recursive
+9
+nix-repl&gt; let a = 3; a = 8; in a
+error: attribute `a&#39; at (string):1:12 already defined at (string):1:5
+nix-repl&gt; longName = { a = 3; b = 4; }
+nix-repl&gt; with longName; a + b
+7
+nix-repl&gt; let a = 10; b = 20; in { inherit a; b = b + 1; }
+{ a = 10; b = 21; }
+nix-repl&gt; { inherit (s) &quot;123&quot; foo; }
+{ &quot;123&quot; = &quot;num&quot;; foo = &quot;bar&quot;; }</code></pre>
+<h2 id="функции-functions">Функции (functions)</h2>
+<pre><code>nix-repl&gt; x: x*2
+«lambda»
+nix-repl&gt; double = x: x * 2
+nix-repl&gt; :t double
+a function
+nix-repl&gt; double 3
+6
+nix-repl&gt; greet = end: name: &quot;Hello, ${name} ${end}&quot;
+nix-repl&gt; greet &quot;dredozubov&quot; &quot;!&quot;
+&quot;Hello, dredozubov !&quot;
+nix-repl&gt; greetExclamaition = greet &quot;!&quot;
+nix-repl&gt; greetExclamaition &quot;s9gf4ult&quot;
+&quot;Hello, s9gf4ult !&quot;</code></pre>
+<h2 id="паттерн-матчинг">Паттерн-матчинг</h2>
+<pre><code>nix-repl&gt; greet = { name, end }: &quot;Hello, ${name} ${end}&quot;
+nix-repl&gt; greet { name = &quot;ak3n&quot;; exc = &quot;!&quot;; }
+&quot;Hello, ak3n !&quot;
+nix-repl&gt; greet = { name, end ? &quot;!&quot; }: &quot;Hello, ${name} ${end}&quot;
+nix-repl&gt; greet { name = &quot;ak3n&quot;; }
+&quot;Hello, ak3n !&quot;
+nix-repl&gt; greet { name = &quot;ak3n&quot;; end = &quot;.&quot;; }
+&quot;Hello, ak3n .&quot;
+nix-repl&gt; greet = { name, end ? &quot;!&quot;, ... }: &quot;Hello, ${name} ${end}&quot;
+nix-repl&gt; greet { name = &quot;ak3n&quot;; end = &quot;.&quot;; extra = &quot;foo&quot;; }
+&quot;Hello, ak3n .&quot;
+nix-repl&gt; foo = {a, ...}@args: args // { a = a + 3; }
+nix-repl&gt; foo { a = 10; b = 11; }
+{ a = 13; b = 11; }</code></pre>
+<h2 id="подключения-файлов-import">Подключения файлов (import)</h2>
+<h3 id="number.nix"><code>number.nix</code></h3>
+<pre><code>3</code></pre>
+<h3 id="function.nix"><code>function.nix</code></h3>
+<pre><code>a: a + 3</code></pre>
+<h3 id="обратно-в-наш-уютный-repl">Обратно в наш уютный repl</h3>
+<pre><code>nix-repl&gt; a = import ./number.nix
+nix-repl&gt; f = import ./function.nix
+nix-repl&gt; f a
+6</code></pre>
+<h2 id="деривации-derivation">Деривации (derivation)</h2>
+<!--
+Вот мы и подошли к моменту, когда мы можем сделать свою собственную деривацию! Исследуем встроенную функцию `derivation`. Она возвращает attrset, но nix показывает его как `derivation`. Странные дела!
+-->
+<pre><code>nix-repl&gt; d = derivation {
+            name = &quot;myname&quot;; 
+            builder = &quot;mybuilder&quot;; 
+            system = &quot;mysystem&quot;; }
+nix-repl&gt; :t d
+a set
+nix-repl&gt; d
+«derivation /nix/store/z3hhlxbckx4g3n9sw91nnvlkjvyw754p-myname.drv»</code></pre>
+<h2 id="деривации-сборка">Деривации: сборка</h2>
+<!--
+Как вы помните, деривации -- это инструкции сборки для nix. Попробуем собрать нашу фейковую деривацию. nix подсказывает, что у нас система не `mysystem`, а `x86\_64-
+linux`. Исправим это и попробуем ещё раз. Теперь проблема в том, что файла `mybuilder`, который должен собрать наш пакет, не существует. Fail. Остановимся и исследуем `derivation` поподробнее.
+-->
+<pre><code>nix-repl&gt; :b d
+[...]
+error: a `mysystem&#39; is required to build ..., but I am a `x86_64-linux&#39;
+nix-repl&gt; d = derivation { 
+            name = &quot;myname&quot;; 
+            builder = &quot;mybuilder&quot;; 
+            system = builtins.currentSystem; }
+nix-repl&gt; :b d
+[...]
+[...]: executing &#39;mybuilder&#39;: No such file or directory</code></pre>
+<h2 id="деривации-что-внутри">Деривации: что внутри?</h2>
+<!--
+Так как derivation -- это обычный attrset, мы можем исследовать его аттрибуты с помощью встроенного инструментария. Заметим, что `drvAttrs` содержит аргументы, переданные в функцию `derivation`, `out` совпадает с самой деривацией (т.к. на данный момент у нашей деривации только один результат), ну и восхитимся магией типизации на аттрибутах (так вот почему nix так странно себя ведет, показывая derivation вместо сета!). Также заметим, что `toString` превращает в строки только те сеты, которые содержат аттрибут `outPath`.
+-->
+<pre><code>nix-repl&gt; builtins.attrNames d
+[ &quot;all&quot; &quot;builder&quot; &quot;drvAttrs&quot; &quot;drvPath&quot; &quot;name&quot; 
+ &quot;out&quot; &quot;outPath&quot; &quot;outputName&quot; &quot;system&quot; &quot;type&quot; ]
+nix-repl&gt; d.drvAttrs
+{ builder = &quot;mybuilder&quot;; name = &quot;myname&quot;; system = &quot;x86_64-linux&quot;; }
+nix-repl&gt; (d == d.out)
+true
+nix-repl&gt; { type = &quot;derivation&quot;; } # Типизация истинных джентельменов
+«derivation ???»
+nix-repl&gt; toString d
+&quot;/nix/store/qaq9ir9w2a34dzkjmk3igfbibi5q59sd-myname&quot;
+nix-repl&gt; toString { outPath = &quot;blah&quot;; }
+&quot;blah&quot;
+nix-repl&gt; toString { a = 10; }
+error: cannot coerce a set to a string, at (string):1:1</code></pre>
+<h2 id="деривации-добавляем-зависимости">Деривации: добавляем зависимости</h2>
+<pre><code>nix-repl&gt; :l &lt;nixpkgs&gt; # nixpkgs -- это огромная куча дериваций!
+Added 10082 variables.
+nix-repl&gt; coreutils
+«derivation /nix/store/...-coreutils-8.30.drv»
+nix-repl&gt; toString coreutils
+&quot;/nix/store/...-coreutils-8.30&quot;
+nix-repl&gt; d = derivation { 
+            name = &quot;myname&quot;; 
+            builder = &quot;${coreutils}/bin/true&quot;; 
+            system = builtins.currentSystem; }
+nix-repl&gt; :b d
+builder for &#39;...-myname.drv&#39; failed to produce output path &#39;...-myname&#39;</code></pre>
+<h2 id="деривации-смотрим-на-зависимости">Деривации: смотрим на зависимости</h2>
+<!--
+`nix show-derivation` показывает содержимое деривации в виде pretty-printed JSON. Как мы видим, у нас в зависимостях появилась ссылка на coreutils.drv, и builder стал указывать на true.
+-->
+<pre><code>$ nix show-derivation /nix/store/...-myname.drv
+{
+  &quot;/nix/store/apvmj79y84wivsnjc2vkv2q79a37nf7l-myname.drv&quot;: {
+    [...]
+    &quot;inputDrvs&quot;: {
+      &quot;...-coreutils-8.30.drv&quot;: [
+        &quot;out&quot;
+      ]
+    },
+    &quot;builder&quot;: &quot;...-coreutils-8.30/bin/true&quot;,
+    [...]
+  }
+}</code></pre>
+<h2 id="деривации-рабочая-деривация">Деривации: рабочая деривация!</h2>
+<!--
+Исправим ошибку, которая не дает нам получить нашу первую собирающуюся деривацию! Создадим скрипт `builder.sh`, который создаст outPath. Обратите внимание: мы не будем указывать hashbang для нашего скрипта, потому что даже сам исполняемый файл bash лежит в `/nix/store`, и путь к нему мы можем определить только из nix. Из-за невозможности добавить hashbang, будем запускать наш сборщик как `bash builder.sh`:
+-->
+<h3 id="builder.sh"><code>builder.sh</code></h3>
+<div class="sourceCode" id="cb35"><pre class="sourceCode bash"><code class="sourceCode bash"><a class="sourceLine" id="cb35-1" title="1"><span class="bu">declare</span> -xp</a>
+<a class="sourceLine" id="cb35-2" title="2"><span class="bu">echo</span> foo <span class="op">&gt;</span> <span class="va">$out</span></a></code></pre></div>
+<h3 id="уютный-nix-repl">Уютный <code>nix repl</code></h3>
+<pre><code>nix-repl&gt; :l &lt;nixpkgs&gt;
+Added 10082 variables.
+nix-repl&gt; d = derivation { 
+            name = &quot;foo&quot;; 
+            builder = &quot;${bash}/bin/bash&quot;; 
+            args = [ ./builder.sh ]; 
+            system = builtins.currentSystem; } 
+nix-repl&gt; :b d
+this derivation produced the following outputs:
+  out -&gt; /nix/store/82jrv90z3aj1lmzr437jpp7m9krnrrzf-foo</code></pre>
+<h2 id="деривации-посмотрим-на-env">Деривации: посмотрим на env</h2>
+<!--
+Посмотрим на то, что показал `declare -xp` (т.е. на переменные окружения, которые доступны внутри сборщика). `nix log` показывает вывод сборщика при сборке определенного пути.
+
+* `$HOME` указывает в пустой `/homeless-shelter`
+* `$PATH` тоже пуст
+* `$PWD` указывает во временную директорию `/build` (на самом деле она находистся в `/tmp`)
+
+Замечу, что все аргументы derivation окажутся в env сборщика.
+-->
+<pre><code>$ nix log /nix/store/...-foo
+[...]
+declare -x HOME=&quot;/homeless-shelter&quot;
+declare -x NIX_BUILD_CORES=&quot;0&quot;
+declare -x NIX_BUILD_TOP=&quot;/build&quot;
+declare -x NIX_LOG_FD=&quot;2&quot;
+declare -x NIX_STORE=&quot;/nix/store&quot;
+declare -x PATH=&quot;/path-not-set&quot;
+declare -x PWD=&quot;/build&quot;
+declare -x TEMP=&quot;/build&quot;
+declare -x builder=&quot;/nix/store/...-bash-4.4-p23/bin/bash&quot;
+declare -x name=&quot;foo&quot;
+declare -x out=&quot;/nix/store/82jrv90z3aj1lmzr437jpp7m9krnrrzf-foo&quot;
+declare -x system=&quot;x86_64-linux&quot;</code></pre>
+<h2 id="деривации-опакетим-простую-программу-на-c">Деривации: опакетим простую программу на C</h2>
+<!--
+Теперь, когда мы умеем создавать рабочие деривации, добавлять зависимости и передавать произвольные переменные в env их сборщика, попробуем опакетить простую программу на C.
+На этот раз вылезем из привычного `nix repl` и напишем файл!
+
+Для сборки программы нам нужны coreutils (для создания выходной директории) и gcc (для сборки). К счастью, эти (и десятки тысяч других) приложения уже опакечены в nixpkgs. Передадим их деривации как аргументы нашему `derivation`, и они окажутся в env сборщика.
+-->
+<h3 id="simple.c"><code>simple.c</code></h3>
+<div class="sourceCode" id="cb38"><pre class="sourceCode c"><code class="sourceCode c"><a class="sourceLine" id="cb38-1" title="1"><span class="dt">void</span> main() {</a>
+<a class="sourceLine" id="cb38-2" title="2">  puts(<span class="st">&quot;Simple!&quot;</span>);</a>
+<a class="sourceLine" id="cb38-3" title="3">}</a></code></pre></div>
+<h3 id="simple_builder.sh"><code>simple_builder.sh</code></h3>
+<div class="sourceCode" id="cb39"><pre class="sourceCode bash"><code class="sourceCode bash"><a class="sourceLine" id="cb39-1" title="1"><span class="bu">export</span> <span class="va">PATH=</span><span class="st">&quot;</span><span class="va">$coreutils</span><span class="st">/bin:</span><span class="va">$gcc</span><span class="st">/bin&quot;</span> <span class="co"># Переменные из derivation</span></a>
+<a class="sourceLine" id="cb39-2" title="2"><span class="fu">mkdir</span> -p <span class="va">$out</span>/bin <span class="co"># Создадим выходную директорию</span></a>
+<a class="sourceLine" id="cb39-3" title="3"><span class="fu">gcc</span> -o <span class="va">$out</span>/bin/simple <span class="va">$src</span> <span class="co"># Соберем нашу программу</span></a></code></pre></div>
+</div>
+<div class="slide section level1">
+
+<h3 id="simple.nix"><code>simple.nix</code></h3>
+<pre><code>with (import &lt;nixpkgs&gt; {});
+derivation {
+  name = &quot;simple&quot;;
+  builder = &quot;${bash}/bin/bash&quot;;
+  args = [ ./simple_builder.sh ]; # Сборщик
+  inherit gcc coreutils; # Зависимости
+  src = ./simple.c;
+  system = builtins.currentSystem;
+}</code></pre>
+<h3 id="поехали">Поехали!</h3>
+<pre><code>$ nix build -f simple.nix
+[1 built, 0.0 MiB DL]
+$ ./result/bin/simple
+Simple!</code></pre>
+<!--
+Успех!
+-->
+</div>
+<div class="slide section level1">
+
+<h3 id="посмотрим-граф-зависимостей-nix-store--q-result---graph">Посмотрим граф зависимостей (<code>nix-store -q result --graph</code>)</h3>
+<p><img src="images/graphviz-51a061c1cc85aa203111e4121c911fb0fa438cb89e96a16302b17a4be9c75885.png" alt="digraph G {
+graph [ dpi=200; ]
+&quot;/nix/store/p6a11dai9b7xw3xgf44pgyr5kdlnr9rf-simple&quot; [label = &quot;simple&quot;, shape = box, style = filled];
+&quot;/nix/store/681354n3k44r8z90m35hm8945vsp95h1-glibc-2.27&quot; -&gt; &quot;/nix/store/p6a11dai9b7xw3xgf44pgyr5kdlnr9rf-simple&quot; [color = &quot;black&quot;];
+&quot;/nix/store/9sll05wmn9b05f0pm1pwfmmq92fg0syh-simple.c&quot; -&gt; &quot;/nix/store/p6a11dai9b7xw3xgf44pgyr5kdlnr9rf-simple&quot; [color = &quot;red&quot;];
+&quot;/nix/store/d4n93jn9fdq8fkmkm1q8f32lfagvibjk-gcc-7.4.0&quot; -&gt; &quot;/nix/store/p6a11dai9b7xw3xgf44pgyr5kdlnr9rf-simple&quot; [color = &quot;green&quot;];
+&quot;/nix/store/hlnxw4k6931bachvg5sv0cyaissimswb-gcc-7.4.0-lib&quot; -&gt; &quot;/nix/store/p6a11dai9b7xw3xgf44pgyr5kdlnr9rf-simple&quot; [color = &quot;blue&quot;];
+&quot;/nix/store/681354n3k44r8z90m35hm8945vsp95h1-glibc-2.27&quot; [label = &quot;glibc-2.27&quot;, shape = box, style = filled];
+&quot;/nix/store/9sll05wmn9b05f0pm1pwfmmq92fg0syh-simple.c&quot; [label = &quot;simple.c&quot;, shape = box, style = filled];
+&quot;/nix/store/d4n93jn9fdq8fkmkm1q8f32lfagvibjk-gcc-7.4.0&quot; [label = &quot;gcc-7.4.0&quot;, shape = box, style = filled];
+&quot;/nix/store/681354n3k44r8z90m35hm8945vsp95h1-glibc-2.27&quot; -&gt; &quot;/nix/store/d4n93jn9fdq8fkmkm1q8f32lfagvibjk-gcc-7.4.0&quot; [color = &quot;magenta&quot;];
+&quot;/nix/store/hlnxw4k6931bachvg5sv0cyaissimswb-gcc-7.4.0-lib&quot; -&gt; &quot;/nix/store/d4n93jn9fdq8fkmkm1q8f32lfagvibjk-gcc-7.4.0&quot; [color = &quot;burlywood&quot;];
+&quot;/nix/store/iiymx8j7nlar3gc23lfkcscvr61fng8s-zlib-1.2.11&quot; -&gt; &quot;/nix/store/d4n93jn9fdq8fkmkm1q8f32lfagvibjk-gcc-7.4.0&quot; [color = &quot;black&quot;];
+&quot;/nix/store/sr4253np2gz2bpha4gn8gqlmiw604155-glibc-2.27-dev&quot; -&gt; &quot;/nix/store/d4n93jn9fdq8fkmkm1q8f32lfagvibjk-gcc-7.4.0&quot; [color = &quot;red&quot;];
+&quot;/nix/store/hlnxw4k6931bachvg5sv0cyaissimswb-gcc-7.4.0-lib&quot; [label = &quot;gcc-7.4.0-lib&quot;, shape = box, style = filled];
+&quot;/nix/store/681354n3k44r8z90m35hm8945vsp95h1-glibc-2.27&quot; -&gt; &quot;/nix/store/hlnxw4k6931bachvg5sv0cyaissimswb-gcc-7.4.0-lib&quot; [color = &quot;green&quot;];
+&quot;/nix/store/iiymx8j7nlar3gc23lfkcscvr61fng8s-zlib-1.2.11&quot; [label = &quot;zlib-1.2.11&quot;, shape = box, style = filled];
+&quot;/nix/store/681354n3k44r8z90m35hm8945vsp95h1-glibc-2.27&quot; -&gt; &quot;/nix/store/iiymx8j7nlar3gc23lfkcscvr61fng8s-zlib-1.2.11&quot; [color = &quot;blue&quot;];
+&quot;/nix/store/sr4253np2gz2bpha4gn8gqlmiw604155-glibc-2.27-dev&quot; [label = &quot;glibc-2.27-dev&quot;, shape = box, style = filled];
+&quot;/nix/store/5lyvydxv0w4f2s1ba84pjlbpvqkgn1ni-linux-headers-4.19.16&quot; -&gt; &quot;/nix/store/sr4253np2gz2bpha4gn8gqlmiw604155-glibc-2.27-dev&quot; [color = &quot;magenta&quot;];
+&quot;/nix/store/681354n3k44r8z90m35hm8945vsp95h1-glibc-2.27&quot; -&gt; &quot;/nix/store/sr4253np2gz2bpha4gn8gqlmiw604155-glibc-2.27-dev&quot; [color = &quot;burlywood&quot;];
+&quot;/nix/store/f5wl80zkrd3fc1jxsljmnpn7y02lz6v1-glibc-2.27-bin&quot; -&gt; &quot;/nix/store/sr4253np2gz2bpha4gn8gqlmiw604155-glibc-2.27-dev&quot; [color = &quot;black&quot;];
+&quot;/nix/store/5lyvydxv0w4f2s1ba84pjlbpvqkgn1ni-linux-headers-4.19.16&quot; [label = &quot;linux-headers-4.19.16&quot;, shape = box, style = filled];
+&quot;/nix/store/f5wl80zkrd3fc1jxsljmnpn7y02lz6v1-glibc-2.27-bin&quot; [label = &quot;glibc-2.27-bin&quot;, shape = box, style = filled];
+&quot;/nix/store/681354n3k44r8z90m35hm8945vsp95h1-glibc-2.27&quot; -&gt; &quot;/nix/store/f5wl80zkrd3fc1jxsljmnpn7y02lz6v1-glibc-2.27-bin&quot; [color = &quot;red&quot;];
+}" /></p>
+</div>
+<div id="стандартные-паттерны-в-nix.-nixpkgs." class="slide section level1">
+<h1>Стандартные паттерны в Nix. nixpkgs.</h1>
+<h2 id="mkderivation"><code>mkDerivation</code></h2>
+<!--
+Итак, у нас есть мощный и специализированный язык, а также пакетный менеджер, который предоставляет удобную, изолированную среду для сборки пакетов. Для того, чтобы опакечивать софт было проще, создадим функцию, которая будет обобщать `derivation` и уменьшать бойлерплейт. Назовем эту функцию...
+-->
+<p>Неудобства <code>derivation</code></p>
+<ul>
+<li>Очень большая часть написанного кода будет повторяться из пакета в пакет
+<ul>
+<li>Распаковка (чаще всего достаточно <code>tar -xf</code>)</li>
+<li>Добавление зависимостей (<code>gcc</code>, <code>coreutils</code>, <code>bash</code>, <code>awk</code>, <code>make</code>, …)</li>
+<li>Сборка (очень часто можно обойтись <code>./configure &amp;&amp; make</code>)</li>
+<li>Установка (<code>make install</code>)</li>
+</ul></li>
+<li>Требует как минимум два файла – builder и expression</li>
+<li>После вычисления уже нельзя поменять отдельные аргументы, а это может быть удобно</li>
+</ul>
+<p>Создадим свой <code>derivation</code> <del>c блекджеком и шлюхами</del> без этих недостатков!</p>
+<h2 id="mkderivation-зависимости-и-стандартный-сборщик"><code>mkDerivation</code>: зависимости и стандартный сборщик</h2>
+<!--
+Для начала, напишем сборщик в файле `generic-builder.sh`. Сначала поставим свой `$PATH`, собрав его из содержимого `buildInputs`. Затем распакуем архив, переданный нам в `$src` и перейдем в свежесозданную директорию. Там сконфигурируем, соберем и установим наш autotools-проект.
+-->
+<h3 id="generic-builder.sh"><code>generic-builder.sh</code></h3>
+<pre><code>set -e
+unset PATH
+for p in $buildInputs $baseInputs; do
+  export PATH=$p/bin${PATH:+:}$PATH
+done
+tar -xf $src
+for d in *; do
+  if [ -d &quot;$d&quot; ]; then
+    cd &quot;$d&quot;
+    break
+  fi
+done
+./configure --prefix=$out
+make
+make install</code></pre>
+</div>
+<div class="slide section level1">
+
+<!--
+В nix-части напишем функцию, которая создает деривацию с нашим сборщиком и некоторыми пакетами по-умолчанию, которые будут полезны при создании любого пакета.
+-->
+<h3 id="generic-builder.nix"><code>generic-builder.nix</code></h3>
+<pre><code>pkgs: attrs:
+  with pkgs;
+  let defaultAttrs = {
+    builder = &quot;${bash}/bin/bash&quot;;
+    args = [ ./builder.sh ];
+    baseInputs = [ gnutar gzip gnumake gcc binutils-unwrapped 
+                   coreutils gawk gnused gnugrep findutils ];
+    buildInputs = [];
+    system = builtins.currentSystem;
+  };
+  in
+derivation (defaultAttrs // attrs)</code></pre>
+<h2 id="mkderivation-добавляем-фазы"><code>mkDerivation</code>: добавляем фазы</h2>
+<!--
+Создадим файл `setup.sh`, в котором определим стандартные "фазы" сборки, которые затем будем использовать в `builder.sh`.
+-->
+<pre><code>unset PATH
+for p in $baseInputs $buildInputs; do
+  export PATH=$p/bin${PATH:+:}$PATH
+done
+
+function unpackPhase() {
+  tar -xzf $src
+
+  for d in *; do
+    if [ -d &quot;$d&quot; ]; then
+      cd &quot;$d&quot;
+      break
+    fi
+  done
+}</code></pre>
+</div>
+<div class="slide section level1">
+
+<pre><code>function configurePhase() {
+  ./configure --prefix=$out
+}
+function buildPhase() {
+  make
+}
+function installPhase() {
+  make install
+}
+function genericBuild() {
+  unpackPhase
+  configurePhase
+  buildPhase
+  installPhase
+  fixupPhase
+}</code></pre>
+</div>
+<div class="slide section level1">
+
+<h3 id="builder.sh-1"><code>builder.sh</code></h3>
+<pre><code>set -e
+source $setup
+genericBuild</code></pre>
+</div>
+<div class="slide section level1">
+
+<h3 id="generic-builder.nix-1"><code>generic-builder.nix</code></h3>
+<pre><code>pkgs: attrs:
+  with pkgs;
+  let defaultAttrs = {
+    builder = &quot;${bash}/bin/bash&quot;;
+    args = [ ./builder.sh ];
+    setup = ./setup.sh;
+    baseInputs = [ gnutar gzip gnumake gcc binutils-unwrapped 
+                   coreutils gawk gnused gnugrep  findutils ];
+    buildInputs = [];
+    system = builtins.currentSystem;
+  };
+  in
+derivation (defaultAttrs // attrs)</code></pre>
+<h2 id="mkderivation-воспользуемся-нашей-функцией"><code>mkDerivation</code>: воспользуемся нашей функцией!</h2>
+<!--
+Отлично! Наша функция умеет собирать autotools-проекты, при этом `builder.sh` получился очень простым благодаря `setup.nix`. Теперь если мы хотим собрать проект не на основе autotools, мы можем это легко сделать, пропустив некоторые фазы в builder.
+-->
+<h3 id="default.nix"><code>default.nix</code></h3>
+<pre><code>let
+  pkgs = import &lt;nixpkgs&gt; {};
+  mkDerivation = import ./generic-builder.nix pkgs;
+in
+mkDerivation {
+  name = &quot;hello&quot;;
+  src = ./hello-2.10.tar.gz;
+};</code></pre>
+<h2 id="пакеты-как-функции-от-зависимостей-паттерн-inputs">Пакеты как функции от зависимостей: паттерн inputs</h2>
+<!--
+Сделаем наш репозиторий ещё удобнее, вынеся определения пакетов в отдельные файлы. В каждом таком файле будет находиться функция, принимающая в качестве аргументов зависимости пакета и возвращающая деривацию (который мы будем создавать с помощью нашего `mkDerivation`)
+-->
+<h3 id="hello.nix"><code>hello.nix</code></h3>
+<pre><code>{ mkDerivation }:
+mkDerivation {
+  name = &quot;hello&quot;;
+  src = ./hello-2.10.tar.gz;
+}</code></pre>
+<h3 id="default.nix-1"><code>default.nix</code></h3>
+<pre><code>let
+  pkgs = import &lt;nixpkgs&gt; {};
+  mkDerivation = import ./generic-builder.nix pkgs;
+in
+{
+  hello = import ./hello.nix { inherit mkDerivation };
+}</code></pre>
+<h2 id="сборка-с-библиотеками-nix_cflags_compile-nix_ldflags">Сборка с библиотеками: <code>NIX_CFLAGS_COMPILE</code>, <code>NIX_LDFLAGS</code></h2>
+<!--
+Если мы хотим собирать пакеты, которые зависят от сторонних библиотек, нам понадобится ещё немного магии: нужно указать GCC и ld, где искать заголовочные и объектные файлы библиотек. Для этого существуют переменные `NIX CFLAGS COMPILE` и `NIX LDFLAGS`
+-->
+<h3 id="generic-builder.sh-1"><code>generic-builder.sh</code></h3>
+<pre><code>[...]
+for p in $baseInputs $buildInputs; do
+  [...]
+  if [ -d $p/include ]; then
+    export NIX_CFLAGS_COMPILE=&quot;-I $p/include${NIX_CFLAGS_COMPILE:+ }\
+$NIX_CFLAGS_COMPILE&quot;
+  fi
+  if [ -d $p/lib ]; then
+    export NIX_LDFLAGS=&quot;-rpath $p/lib -L \
+$p/lib${NIX_LDFLAGS:+ }$NIX_LDFLAGS&quot;
+  fi
+done
+[...]</code></pre>
+</div>
+<div class="slide section level1">
+
+<h3 id="graphviz.nix"><code>graphviz.nix</code></h3>
+<pre><code>{ mkDerivation, gdSupport ? true, gd, fontconfig, libjpeg, bzip2 }:
+
+mkDerivation {
+  name = &quot;graphviz&quot;;
+  src = ./graphviz-2.38.0.tar.gz;
+  buildInputs = if gdSupport 
+  then [ gd fontconfig libjpeg bzip2 ] 
+  else [];
+}</code></pre>
+</div>
+<div class="slide section level1">
+
+<h3 id="default.nix-2"><code>default.nix</code></h3>
+<pre><code>let
+  pkgs = import &lt;nixpkgs&gt; {};
+  mkDerivation = import ./generic-builder.nix pkgs;
+in
+{
+  hello = import ./hello.nix { inherit mkDerivation };
+  graphviz = import ./graphviz.nix { inherit mkDerivation 
+      gd fontconfig libjpeg bzip2; };
+  graphvizCore = import ./graphviz.nix {
+    inherit mkDerivation gd fontconfig libjpeg bzip2;
+    gdSupport = false;
+  };
+}</code></pre>
+<h2 id="паттерн-callpackage">Паттерн <code>callPackage</code></h2>
+<!--
+Здорово! Мы сделали свой небольшой репозиторий с красивой файловой структурой, научились собирать пакеты с помощью autotools с возможностью легко перейти на другие системы сборки и даже собирать пакеты с библиотеками. Теперь пора уменьшить бойлерплейт. Можно заметить, что в корневом файле репозитория мы повторяем названия аргументов функции при её вызове. Это будет происходить постоянно при структуре репозитория, похожего на наш. Для того, чтобы исправить эту проблему, мы создадим функцию `callPackage`, которая будет вызывать функцию из указанного файла, автоматически передавая ей аргументы из указанного attrset. Например:
+-->
+<h3 id="default.nix-3"><code>default.nix</code></h3>
+<pre><code>let
+  pkgs = import &lt;nixpkgs&gt; {};
+  mkDerivation = import ./generic-builder.nix pkgs;
+in
+{
+  hello = callPackage ./hello.nix { };
+  graphviz = callPackage ./graphviz.nix { };
+  graphvizCore = callPackage ./graphviz.nix { gdSupport = false; };
+}</code></pre>
+</div>
+<div class="slide section level1">
+
+<!--
+Для начала разберемся с тем, как же нам найти названия аргументов функции. В nix для этого существует встроенная функция `builins.functionArgs`. Она возвращает attrset, в котором названию аргументов соответствует наличие у них значения по-умолчанию.
+-->
+<pre><code>nix-repl&gt; add = { a ? 3, b }: a+b
+nix-repl&gt; builtins.functionArgs add
+{ a = true; b = false; }</code></pre>
+<!--
+Также в nix существует удобный builtin для "пересечения" двух attrset-ов. Он возвращает attrset, в котором имена аттрибутов -- пересечение имен аттрибутов его аргументов, а их значения берутся из второго аргумента. Например:
+-->
+<pre><code>nix-repl&gt; values = { a = 3; b = 5; c = 10; }
+nix-repl&gt; builtins.intersectAttrs values (builtins.functionArgs add)
+{ a = true; b = false; }
+nix-repl&gt; builtins.intersectAttrs (builtins.functionArgs add) values
+{ a = 3; b = 5; }</code></pre>
+<h2 id="простой-вариант-callpackage">Простой вариант <code>callPackage</code></h2>
+<!--
+Обладая этими знаниями, напишем простую реализацию нашего callPackage.
+-->
+<pre><code>nix-repl&gt; callPackage = set: f: 
+          f (builtins.intersectAttrs 
+              (builtins.functionArgs f) 
+              set)
+nix-repl&gt; callPackage values add
+8
+nix-repl&gt; with values; add { inherit a b; }
+8</code></pre>
+<h2 id="callpackage-добавляем-оверрайды"><code>callPackage</code>: добавляем оверрайды</h2>
+<!--
+Добавим возможность перегружать значения с помощью последнего аргумента...
+-->
+<pre><code>nix-repl&gt; callPackage = set: f: overrides: 
+            f ((builtins.intersectAttrs 
+                  (builtins.functionArgs f) 
+                  set) 
+                // overrides)
+nix-repl&gt; callPackage values add { }
+8
+nix-repl&gt; callPackage values add { b = 12; }
+15</code></pre>
+<h2 id="callpackage-используем"><code>callPackage</code>: используем!</h2>
+<pre><code>let
+  nixpkgs = import &lt;nixpkgs&gt; {};
+  allPkgs = nixpkgs // pkgs;
+  callPackage = path: overrides:
+    let f = import path;
+    in f ((builtins.intersectAttrs 
+             (builtins.functionArgs f) 
+             allPkgs) 
+           // overrides);
+  pkgs = with nixpkgs; {
+    mkDerivation = import ./generic-builder.nix nixpkgs;
+    hello = callPackage ./hello.nix { };
+    graphviz = callPackage ./graphviz.nix { };
+    graphvizCore = callPackage ./graphviz.nix { gdSupport = false; };
+  };
+in pkgs</code></pre>
+<h2 id="паттерн-override">Паттерн <code>override</code></h2>
+<!--
+Nix -- это функциональный язык. Одна из идей функциональной парадигмы состоит в композиции функций. Это может быть очень удобно при работе с деривациями. Например, если мы хотим получить `graphviz`, собранный с нашей собственной версией библиотеки gd, на данный момент нам придется заново делать `callPackage ./graphviz.nix { gd = customgd; }` Это неудобно и добавляет бойлерплейт. 
+-->
+<pre><code>mygraphviz = callPackage ./graphviz.nix { gd = customgd; }
+
+VS.
+
+mygraphviz = pkgs.graphviz.override { gd = customgd }</code></pre>
+<h2 id="паттерн-override-makeoverridable">Паттерн <code>override</code>: <code>makeOverridable</code></h2>
+<!--
+Для реализации нашей затеи напишем функцию `mkOverridable`, которая будет принимать функцию, возвращающую attrset, и attrset (который будет являться "дефолтными" аргументами для данной функции). Вернет `makeOverridable` тот же attrset, что вернула бы данная функция, с добавлением аттрибута `override`, который является функцией, позволяющей нам "перегружать" стандартные аргументы.
+-->
+<h3 id="lib.nix"><code>lib.nix</code></h3>
+<pre><code>rec {
+  makeOverridable = f: origArgs:
+    let
+      origRes = f origArgs;
+    in
+      origRes // { 
+        override = newArgs: 
+          makeOverridable f (origArgs // newArgs); 
+      };
+}</code></pre>
+<h2 id="паттерн-override-потестируем">Паттерн <code>override</code>: потестируем!</h2>
+<!--
+Работает! Теперь мы можем легко "перегружать" аргументы пакетов (которые, напомню, просто функции) в нашем репозитории. Нужно только не забыть вызывать все эти пакеты с makeOverridable.
+-->
+<pre><code>nix-repl&gt; :l lib.nix
+Added 1 variables.
+nix-repl&gt; f = { a, b }: { result = a+b; }
+nix-repl&gt; res = makeOverridable f { a = 3; b = 5; }
+nix-repl&gt; res2 = res.override { a = 10; }
+nix-repl&gt; res2
+{ override = «lambda»; result = 15; }
+nix-repl&gt; res2.override { b = 20; }
+{ override = «lambda»; result = 30; }</code></pre>
+<h2 id="паттерн-override-объединяем-с-callpackage">Паттерн <code>override</code>: объединяем с <code>callPackage</code></h2>
+<h3 id="lib.nix-1"><code>lib.nix</code></h3>
+<pre><code>rec {
+  [...]
+  callPackage = pkgs: path: overrides:
+    let f = import path;
+    in makeOverridable 
+      f ((builtins.intersectAttrs 
+            (builtins.functionArgs f) 
+            pkgs) 
+          // overrides);
+}</code></pre>
+<h2 id="паттерн-override-репозиторий">Паттерн <code>override</code>: репозиторий</h2>
+<h3 id="default.nix-4"><code>default.nix</code></h3>
+<pre><code>let
+  lib = import ./lib.nix;
+  nixpkgs = import &lt;nixpkgs&gt; {};
+  callPackage = lib.callPackage allPkgs;
+  allPkgs = nixpkgs // pkgs;
+  pkgs = with nixpkgs; rec {
+    mkDerivation = import ./generic-builder.nix nixpkgs;
+    hello = callPackage ./hello.nix { };
+    graphviz = callPackage ./graphviz.nix { };
+    graphvizCore = graphviz.override { gdSupport = false };
+  };
+in pkgs</code></pre>
+<h2 id="nixpkgs-краткая-справка">nixpkgs: краткая справка</h2>
+<h3 id="общая-конфигурация-для-всех-пакетов">Общая конфигурация для всех пакетов</h3>
+<ul>
+<li><code>import &lt;nixpkgs&gt; { config = {...}; }</code></li>
+<li><code>$NIXPKGS_CONFIG</code></li>
+<li><code>~/.config/nixpkgs/config.nix</code></li>
+</ul>
+<h3 id="перегрузка-пакетов">Перегрузка пакетов</h3>
+<pre><code>config.packageOverrides = oldPkgs: {
+  graphviz = oldPkgs.graphviz.override { gd = customgd; };
+}</code></pre>
+<h3 id="оверлеи">Оверлеи</h3>
+<pre><code>nixpkgs.overlays = [ (self: super: {
+  graphviz = super.graphviz.override { gd = customgd; };
+} ) ];</code></pre>
+<h2 id="что-осталось-за-кадром-в-этом-разделе">Что осталось за кадром в этом разделе</h2>
+<!--
+Нельзя объять необъятное -- а nixpkgs действительно необъятен, более 20МБ кода на данный момент -- и поэтому я оставлю изучение частностей на совести слушателя.
+-->
+<ul>
+<li><code>stdenv</code></li>
+<li><code>lib</code></li>
+<li><code>fix</code></li>
+</ul>
+<p><a href="https://nixos.org/nixos/nix-pills" class="uri">https://nixos.org/nixos/nix-pills</a> и <a href="https://nixos.org/nixpkgs/manual" class="uri">https://nixos.org/nixpkgs/manual</a> – для тех, кому надо или интересно!</p>
+</div>

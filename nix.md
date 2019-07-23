@@ -341,6 +341,8 @@ nix-repl> [ import ./hello.nix {} ]
 ## Множества аттрибутов (attribute sets, attrsets)
 ```
 nix-repl> s = { foo = "bar"; a-b = "baz"; "123" = "num"; }
+nix-repl> :t s
+a set
 nix-repl> s
 { "123" = "num"; a-b = "baz"; foo = "bar"; }
 nix-repl> s.a-b
@@ -349,8 +351,6 @@ nix-repl> s."123"
 "num"
 nix-repl> s.${toString (122 + 1)}
 "num"
-nix-repl> s.abc or "not found" # Note that `or` is a keyword
-"not found"
 ```
 ***
 ```
@@ -358,8 +358,10 @@ nix-repl> s ? "123"
 true
 nix-repl> s ? a-b
 true
-nix-repl> s ? sjdnfksjd
+nix-repl> s ? abc
 false
+nix-repl> s.abc or "not found" # Note that `or` is a keyword
+"not found"
 nix-repl> s // { a = 10; }
 { "123" = "num"; a = 10; a-b = "baz"; foo = "bar"; }
 nix-repl> rec { a = 3; b = a + 4; } # Recursive attrset

@@ -39,6 +39,8 @@ header-includes:
 
 Вы можете прекратить слушать после любой секции, и я надеюсь, что вы унесете какую-то полезную для себя информацию.
 
+Исходники, собранный pdf и заметки докладчика для этой презентации находятся на <https://github.com/typeable/nix-pills-ru>
+
 
 <!-- 
 Как вы все скорее всего знаете, мы используем Nix для сборки и тестирования нашего кода. Я, Александр Бантьев (@balsoft) отвечаю за инфраструктуру сборки пакетов (Hydra, NixOps), а также за поддержание инструкций сборки в актуальном состоянии. Я бы хотел рассказать вам про nix с помощью вольного пересказа отличной серии статей ["Nix pills"](https://nixos.org/nixos/nix-pills)
@@ -352,7 +354,7 @@ nix-repl> s."123"
 nix-repl> s.${toString (122 + 1)}
 "num"
 ```
-***
+## Множества аттрибутов
 ```
 nix-repl> s ? "123"
 true
@@ -821,20 +823,20 @@ in
 
 ## Сборка с библиотеками: `NIX_CFLAGS_COMPILE`, `NIX_LDFLAGS`
 <!--
-Если мы хотим собирать пакеты, которые зависят от сторонних библиотек, нам понадобится ещё немного магии: нужно указать GCC и ld, где искать заголовочные и объектные файлы библиотек. Для этого существуют переменные `NIX_CFLAGS_COMPILE` и `NIX_LDFLAGS_`
+Если мы хотим собирать пакеты, которые зависят от сторонних библиотек, нам понадобится ещё немного магии: нужно указать GCC и ld, где искать заголовочные и объектные файлы библиотек. Для этого существуют переменные `NIX CFLAGS COMPILE` и `NIX LDFLAGS`
 -->
 ### `generic-builder.sh`
 ```
 [...]
 for p in $baseInputs $buildInputs; do
-  if [ -d $p/bin ]; then
-    export PATH="$p/bin${PATH:+:}$PATH"
-  fi
+  [...]
   if [ -d $p/include ]; then
-    export NIX_CFLAGS_COMPILE="-I $p/include${NIX_CFLAGS_COMPILE:+ }$NIX_CFLAGS_COMPILE"
+    export NIX_CFLAGS_COMPILE="-I $p/include${NIX_CFLAGS_COMPILE:+ }\
+$NIX_CFLAGS_COMPILE"
   fi
   if [ -d $p/lib ]; then
-    export NIX_LDFLAGS="-rpath $p/lib -L $p/lib${NIX_LDFLAGS:+ }$NIX_LDFLAGS"
+    export NIX_LDFLAGS="-rpath $p/lib -L \
+$p/lib${NIX_LDFLAGS:+ }$NIX_LDFLAGS"
   fi
 done
 [...]
@@ -847,7 +849,9 @@ done
 mkDerivation {
   name = "graphviz";
   src = ./graphviz-2.38.0.tar.gz;
-  buildInputs = if gdSupport then [ gd fontconfig libjpeg bzip2 ] else [];
+  buildInputs = if gdSupport 
+  then [ gd fontconfig libjpeg bzip2 ] 
+  else [];
 }
 ```
 ***
@@ -874,11 +878,14 @@ in
 -->
 ### `default.nix`
 ```
+let
+  pkgs = import <nixpkgs> {};
+  mkDerivation = import ./generic-builder.nix pkgs;
+in
 {
   hello = callPackage ./hello.nix { };
   graphviz = callPackage ./graphviz.nix { };
-  graphvizCore = callPackage ./graphviz.nix
-                 { gdSupport = false; };
+  graphvizCore = callPackage ./graphviz.nix { gdSupport = false; };
 }
 ```
 ***
@@ -907,7 +914,8 @@ nix-repl> builtins.intersectAttrs (builtins.functionArgs add) values
 ```
 nix-repl> callPackage = set: f: 
           f (builtins.intersectAttrs 
-            (builtins.functionArgs f) set)
+              (builtins.functionArgs f) 
+              set)
 nix-repl> callPackage values add
 8
 nix-repl> with values; add { inherit a b; }
@@ -920,7 +928,9 @@ nix-repl> with values; add { inherit a b; }
 ```
 nix-repl> callPackage = set: f: overrides: 
             f ((builtins.intersectAttrs 
-              (builtins.functionArgs f) set) // overrides)
+                  (builtins.functionArgs f) 
+                  set) 
+                // overrides)
 nix-repl> callPackage values add { }
 8
 nix-repl> callPackage values add { b = 12; }
@@ -933,7 +943,10 @@ let
   allPkgs = nixpkgs // pkgs;
   callPackage = path: overrides:
     let f = import path;
-    in f ((builtins.intersectAttrs (builtins.functionArgs f) allPkgs) // overrides);
+    in f ((builtins.intersectAttrs 
+             (builtins.functionArgs f) 
+             allPkgs) 
+           // overrides);
   pkgs = with nixpkgs; {
     mkDerivation = import ./generic-builder.nix nixpkgs;
     hello = callPackage ./hello.nix { };
@@ -953,7 +966,7 @@ VS.
 
 mygraphviz = pkgs.graphviz.override { gd = customgd }
 ```
-***
+## Паттерн `override`: `makeOverridable`
 <!--
 Для реализации нашей затеи напишем функцию `mkOverridable`, которая будет принимать функцию, возвращающую attrset, и attrset (который будет являться "дефолтными" аргументами для данной функции). Вернет `makeOverridable` тот же attrset, что вернула бы данная функция, с добавлением аттрибута `override`, который является функцией, позволяющей нам "перегружать" стандартные аргументы.
 -->
@@ -970,8 +983,7 @@ rec {
       };
 }
 ```
-***
-### Протестируем в `nix repl`
+## Паттерн `override`: потестируем!
 <!--
 Работает! Теперь мы можем легко "перегружать" аргументы пакетов (которые, напомню, просто функции) в нашем репозитории. Нужно только не забыть вызывать все эти пакеты с makeOverridable.
 -->
@@ -986,7 +998,7 @@ nix-repl> res2
 nix-repl> res2.override { b = 20; }
 { override = «lambda»; result = 30; }
 ```
-***
+## Паттерн `override`: объединяем с `callPackage`
 ### `lib.nix`
 ```
 rec {
@@ -995,10 +1007,12 @@ rec {
     let f = import path;
     in makeOverridable 
       f ((builtins.intersectAttrs 
-        (builtins.functionArgs f) pkgs) // overrides);
+            (builtins.functionArgs f) 
+            pkgs) 
+          // overrides);
 }
 ```
-***
+## Паттерн `override`: репозиторий
 ### `default.nix`
 ```
 let
@@ -1014,9 +1028,35 @@ let
   };
 in pkgs
 ```
-## nixpkgs
-<!--
-Изначально я планировал вкратце рассказать про остальные паттерны nixpkgs, но в итоге получился просто объяснение, что же происходит в каждом файле, которое к тому же растянуло бы презентацию ещё на несколько десятков слайдов. На самом деле, на данный момент ваших знаний nix вполне достаточно для чтения исходников nixpkgs.
--->
-> Изучение nixpkgs остается в качестве упражнения для слушателя. 
+## nixpkgs: краткая справка
+
+### Общая конфигурация для всех пакетов
+
+* `import <nixpkgs> { config = {...}; }`
+* `$NIXPKGS_CONFIG`
+* `~/.config/nixpkgs/config.nix`
+
+
+### Перегрузка пакетов
+
+```
+config.packageOverrides = oldPkgs: {
+  graphviz = oldPkgs.graphviz.override { gd = customgd; };
+}
+```
+
+### Оверлеи
+```
+nixpkgs.overlays = [ (self: super: {
+  graphviz = super.graphviz.override { gd = customgd; };
+} ) ];
+```
+
+## Что осталось за кадром в этом разделе
+
+* `stdenv`
+* `lib`
+* `fix`
+
+<https://nixos.org/nixos/nix-pills> и <https://nixos.org/nixpkgs/manual> -- для тех, кому надо или интересно!
 

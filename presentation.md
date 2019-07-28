@@ -1052,6 +1052,18 @@ nixpkgs.overlays = [ (self: super: {
 } ) ];
 ```
 
+## `stdenv.mkDerivation`: прокачиваем наш `mkDerivation`
+<!--
+Наша функция `mkDerivation`, без сомнения, прекарасна, но можно лучше! `stdenv.mkDerivation` из nixpkgs предоставляет интерфейс (т.е принимаемые и возвращаемые значения) очень похожие на наш `mkDerivation`, с несколькими отличиями:
+-->
+`stdenv.mkDerivation` может...
+
+* Изменять поведение фаз, например `{ buildPhase = "make"; }`
+* Изменять список фаз `{ phases = [ "buildPhase" ]; }`
+* Перегружать аргументы с помощью `overrideAttrs`
+* Автоматически добавлять хуки на проброс зависимостей с помощью `propogatedBuildInputs`
+
+
 ## Что осталось за кадром в этом разделе
 
 <!--
@@ -1061,6 +1073,6 @@ nixpkgs.overlays = [ (self: super: {
 * `stdenv`
 * `lib`
 * `fix`
-
+* ...
 <https://nixos.org/nixos/nix-pills> и <https://nixos.org/nixpkgs/manual> -- для тех, кому надо или интересно!
 

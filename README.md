@@ -1,6 +1,6 @@
 # Nix pills in russian
 
-This repo contains a presentation about nix based on the wonderful [nix-pills](https://nixos.org/nixops/nix-pills).
+This repo contains a presentation about nix based on the wonderful [nix-pills](https://nixos.org/nixos/nix-pills).
 
 Markdown document is located [here](./presentation.md).
 
